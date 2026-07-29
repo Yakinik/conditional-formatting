@@ -37,7 +37,7 @@ Google スプレッドシート / Excel の条件付き書式でよく使うパ�
       → **ユーザー指示により途中で停止**。app.js / README.md は未検収・完了報告なし
 - [x] 三層ブランチ運用スキル tri-branch-pages を作成（`~/.agents/skills/tri-branch-pages/`、
       `~/.claude/skills/` から symlink）。スモークテスト: init-branches / publish(新規・冪等) 済み。
-      未検証: 変更後 publish・sync-main
+      追加検証: publish(変更後・隔離環境) / sync-main(実リポジトリ) 済み。
 - [x] （Codex へ引き継ぎ: `tasks/handoff-codex.md`）app.js / README.md の検収・修正
 - [x] （Codex へ引き継ぎ）tri-branch-pages init 手順で公開:
       git init -b develop → .pages-manifest → init-branches → gh repo create（Yakinik/conditional-formatting, public）
