@@ -41,7 +41,19 @@
     var m = RANGE_RE.exec(text);
     if (!m) return null;
     var row = m[2] ? parseInt(m[2], 10) : 1;
-    return { text: text, col: m[1], row: row, cell: m[1] + row, abs: absRange(text) };
+    var endCol = m[3] || m[1];
+    var startIdx = colToIdx(m[1]);
+    var endIdx = colToIdx(endCol);
+    return {
+      text: text,
+      col: m[1],
+      endCol: endCol,
+      colCount: Math.abs(endIdx - startIdx) + 1,
+      colStep: endIdx >= startIdx ? 1 : -1,
+      row: row,
+      cell: m[1] + row,
+      abs: absRange(text)
+    };
   }
 
   function colToIdx(col) {
@@ -115,12 +127,53 @@
     return COLORS[0];
   }
 
-  var CATEGORIES = [
-    { id: 'text', label: '文字・キーワード', bg: '#f7ecd9' },
-    { id: 'row', label: '行全体の色付け', bg: '#e3efe7' },
-    { id: 'number', label: '数値', bg: '#e7ecf6' },
-    { id: 'date', label: '日付・期限', bg: '#f6e7e2' },
-    { id: 'other', label: 'その他の定番', bg: '#eee9f6' }
+  var NAV_GROUPS = [
+    {
+      label: '値を見て判定',
+      bg: '#f7ecd9',
+      items: [
+        {
+          id: 'text',
+          label: '文字・キーワード',
+          summary: '1つ・複数・行全体',
+          variants: [
+            { ruleId: 'keyword', label: 'キーワード（1つ）' },
+            { ruleId: 'multiKeyword', label: 'キーワード（複数）' },
+            { ruleId: 'rowByCell', label: '列の値で行全体' }
+          ]
+        },
+        {
+          id: 'number',
+          label: '数値',
+          summary: 'しきい値・範囲',
+          variants: [
+            { ruleId: 'threshold', label: 'しきい値と比較' },
+            { ruleId: 'between', label: '範囲内' }
+          ]
+        },
+        {
+          id: 'date',
+          label: '日付・曜日',
+          summary: '期限・日数・曜日',
+          variants: [
+            { ruleId: 'overdue', label: '期限切れ' },
+            { ruleId: 'dueSoon', label: '期限が近い' },
+            { ruleId: 'weekend', label: '曜日' }
+          ]
+        },
+        { id: 'blank', label: '空白', summary: '未入力・入力済み', ruleId: 'blank' }
+      ]
+    },
+    {
+      label: '表・リストで判定',
+      bg: '#e3efe7',
+      items: [
+        { id: 'checkbox', label: 'チェックボックス', summary: 'オンの行をまとめて', ruleId: 'checkbox' },
+        { id: 'duplicate', label: '重複', summary: 'すべて・2件目以降', ruleId: 'duplicate' },
+        { id: 'stripes', label: '交互の背景色', summary: '偶数行・奇数行', ruleId: 'stripes' },
+        { id: 'inList', label: '別リストとの一致', summary: '別範囲と照合', ruleId: 'inList' }
+      ]
+    }
   ];
 
   /* ============================================================
@@ -798,13 +851,26 @@
     return null;
   }
 
+  function navItemById(id) {
+    for (var i = 0; i < NAV_GROUPS.length; i++) {
+      for (var j = 0; j < NAV_GROUPS[i].items.length; j++) {
+        if (NAV_GROUPS[i].items[j].id === id) return NAV_GROUPS[i].items[j];
+      }
+    }
+    return null;
+  }
+
+  function navRuleId(item) {
+    return item.ruleId || item.variants[0].ruleId;
+  }
+
   /* ============================================================
      状態
      ============================================================ */
 
   var STORAGE_KEY = 'cfgen-app';
 
-  var state = { app: 'sheets', ruleId: null, values: {} };
+  var state = { app: 'sheets', navId: null, ruleId: null, values: {}, valuesByRule: {} };
 
   function loadApp() {
     try {
@@ -848,42 +914,34 @@
 
   function renderCards() {
     clearEl(groupsEl);
-    CATEGORIES.forEach(function (cat) {
-      var rules = RULES.filter(function (r) { return r.cat === cat.id; });
-      if (!rules.length) return;
-
+    NAV_GROUPS.forEach(function (navGroup) {
       var group = document.createElement('div');
       group.className = 'pattern-group';
 
       var title = document.createElement('span');
       title.className = 'pattern-group-title';
-      title.style.background = cat.bg;
-      title.textContent = cat.label;
+      title.style.background = navGroup.bg;
+      title.textContent = navGroup.label;
       group.appendChild(title);
 
       var cards = document.createElement('div');
       cards.className = 'pattern-cards';
 
-      rules.forEach(function (rule) {
+      navGroup.items.forEach(function (item) {
         var card = document.createElement('button');
         card.type = 'button';
         card.className = 'pattern-card';
-        card.setAttribute('data-rule', rule.id);
+        card.setAttribute('data-nav', item.id);
 
         var h3 = document.createElement('h3');
-        h3.textContent = rule.title;
+        h3.textContent = item.label;
         card.appendChild(h3);
 
         var p = document.createElement('p');
-        p.textContent = rule.desc;
+        p.textContent = item.summary;
         card.appendChild(p);
 
-        var chip = document.createElement('span');
-        chip.className = 'chip';
-        chip.textContent = rule.chip;
-        card.appendChild(chip);
-
-        card.addEventListener('click', function () { selectRule(rule.id); });
+        card.addEventListener('click', function () { selectNavItem(item.id); });
         cards.appendChild(card);
       });
 
@@ -895,7 +953,7 @@
   function markSelectedCard() {
     var cards = groupsEl.querySelectorAll('.pattern-card');
     Array.prototype.forEach.call(cards, function (card) {
-      if (card.getAttribute('data-rule') === state.ruleId) card.classList.add('selected');
+      if (card.getAttribute('data-nav') === state.navId) card.classList.add('selected');
       else card.classList.remove('selected');
     });
   }
@@ -948,6 +1006,24 @@
     return wrap;
   }
 
+  function buildVariantField(item) {
+    var field = {
+      name: 'ruleVariant',
+      type: 'select',
+      label: '条件の種類',
+      options: item.variants.map(function (variant) {
+        return { value: variant.ruleId, label: variant.label };
+      })
+    };
+    var wrap = buildField(field);
+    wrap.classList.add('field-wide', 'variant-field');
+    var select = wrap.querySelector('select');
+    select.removeAttribute('data-field');
+    select.setAttribute('data-variant', 'true');
+    select.value = state.ruleId;
+    return wrap;
+  }
+
   function buildPalette() {
     var wrap = document.createElement('div');
     wrap.className = 'field field-wide';
@@ -984,8 +1060,9 @@
     return wrap;
   }
 
-  function renderForm(rule) {
+  function renderForm(rule, item) {
     clearEl(formEl);
+    if (item.variants) formEl.appendChild(buildVariantField(item));
     rule.fields.forEach(function (field) {
       formEl.appendChild(buildField(field));
     });
@@ -1051,17 +1128,54 @@
     var s = rule.sample(v, r);
     var numCols = s.numCols || [];
     var startIdx = colToIdx(r.col);
+    var maxColumns = 6;
+    var columnCount = Math.min(r.colCount, maxColumns);
+
+    function headerAt(index) {
+      if (s.head.length === 1 && columnCount > 1) return s.head[0] + ' ' + (index + 1);
+      return s.head[index] || '項目 ' + (index + 1);
+    }
+
+    function cellAt(rowIndex, columnIndex) {
+      var row = s.rows[rowIndex];
+      if (columnIndex < row.cells.length) {
+        return {
+          text: row.cells[columnIndex],
+          match: !!row.match[columnIndex],
+          numeric: numCols.indexOf(columnIndex) !== -1
+        };
+      }
+      if (s.head.length === 1) {
+        var source = s.rows[(rowIndex + columnIndex) % s.rows.length];
+        return {
+          text: source.cells[0],
+          match: !!source.match[0],
+          numeric: numCols.indexOf(0) !== -1
+        };
+      }
+      var rowMatch = row.match.length > 0 && row.match.every(function (matched) {
+        return matched === row.match[0];
+      });
+      return { text: '—', match: rowMatch && !!row.match[0], numeric: false };
+    }
+
+    if (r.colCount > maxColumns) {
+      var limitNote = document.createElement('p');
+      limitNote.className = 'preview-limit-note';
+      limitNote.textContent = r.colCount + '列のうち先頭' + maxColumns + '列を表示';
+      previewEl.appendChild(limitNote);
+    }
 
     var table = document.createElement('table');
 
     var thead = document.createElement('thead');
     var headTr = document.createElement('tr');
     headTr.appendChild(document.createElement('th'));
-    s.head.forEach(function (_, i) {
+    for (var i = 0; i < columnCount; i++) {
       var th = document.createElement('th');
-      th.textContent = idxToCol(startIdx + i);
+      th.textContent = idxToCol(startIdx + (i * r.colStep));
       headTr.appendChild(th);
-    });
+    }
     thead.appendChild(headTr);
     table.appendChild(thead);
 
@@ -1072,12 +1186,12 @@
       var hrNo = document.createElement('th');
       hrNo.textContent = String(r.row - 1);
       hr.appendChild(hrNo);
-      s.head.forEach(function (label) {
+      for (var j = 0; j < columnCount; j++) {
         var td = document.createElement('td');
         td.className = 'head-row';
-        td.textContent = label;
+        td.textContent = headerAt(j);
         hr.appendChild(td);
-      });
+      }
       tbody.appendChild(hr);
     }
 
@@ -1086,16 +1200,17 @@
       var no = document.createElement('th');
       no.textContent = String(r.row + i);
       tr.appendChild(no);
-      row.cells.forEach(function (cell, j) {
+      for (var j = 0; j < columnCount; j++) {
+        var cell = cellAt(i, j);
         var td = document.createElement('td');
-        if (numCols.indexOf(j) !== -1) td.className = 'num';
-        td.textContent = cell;
-        if (row.match[j]) {
+        if (cell.numeric) td.className = 'num';
+        td.textContent = cell.text;
+        if (cell.match) {
           td.style.background = color.bg;
           td.style.color = color.fg;
         }
         tr.appendChild(td);
-      });
+      }
       tbody.appendChild(tr);
     });
 
@@ -1142,19 +1257,34 @@
      ルール選択
      ============================================================ */
 
-  function selectRule(id) {
+  function defaultValues(rule) {
+    var values = {};
+    rule.fields.forEach(function (field) { values[field.name] = field.def; });
+    values.color = rule.color;
+    return values;
+  }
+
+  function selectNavItem(id) {
+    var item = navItemById(id);
+    if (!item) return;
+    var ruleId = state.navId === id && state.ruleId ? state.ruleId : navRuleId(item);
+    selectRule(ruleId, id);
+  }
+
+  function selectRule(id, navId) {
     var rule = ruleById(id);
-    if (!rule) return;
+    var item = navItemById(navId || state.navId);
+    if (!rule || !item) return;
 
     if (state.ruleId !== id) {
+      state.navId = item.id;
       state.ruleId = id;
-      state.values = {};
-      rule.fields.forEach(function (f) { state.values[f.name] = f.def; });
-      state.values.color = rule.color;
+      if (!state.valuesByRule[id]) state.valuesByRule[id] = defaultValues(rule);
+      state.values = state.valuesByRule[id];
 
       markSelectedCard();
-      ruleTitleEl.textContent = rule.title;
-      renderForm(rule);
+      ruleTitleEl.textContent = item.label;
+      renderForm(rule, item);
       renderResult();
     }
 
@@ -1214,6 +1344,10 @@
      ============================================================ */
 
   function onFormChange(e) {
+    if (e.target && e.target.getAttribute && e.target.getAttribute('data-variant')) {
+      selectRule(e.target.value, state.navId);
+      return;
+    }
     var name = e.target && e.target.getAttribute && e.target.getAttribute('data-field');
     if (!name) return;
     state.values[name] = e.target.value;
