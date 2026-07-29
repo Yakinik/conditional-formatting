@@ -1161,7 +1161,6 @@
     configEl.classList.remove('hidden');
     resultEl.classList.remove('hidden');
     workspaceEmptyEl.classList.add('hidden');
-    configEl.scrollIntoView({ behavior: 'smooth' });
   }
 
   /* ============================================================
