@@ -43,67 +43,82 @@
     </p>
   </section>
 
-  <section class="patterns" id="patterns" aria-label="パターンの選択">
-    <div class="section-head">
-      <span class="step-no">1</span>
-      <div>
-        <h2>やりたいことを選ぶ</h2>
-        <p>セルや行に色を付ける、よく使うパターンの一覧です。</p>
+  <div class="workbench">
+    <aside class="patterns" id="patterns" aria-label="パターンの選択">
+      <div class="section-head">
+        <span class="step-no">1</span>
+        <div>
+          <h2>やりたいことを選ぶ</h2>
+          <p>13種類の定番ルール</p>
+        </div>
       </div>
-    </div>
-    <div id="pattern-groups"></div>
-  </section>
+      <nav id="pattern-groups" aria-label="条件付き書式のルール"></nav>
+    </aside>
 
-  <section class="config hidden" id="config" aria-label="条件の設定">
-    <div class="section-head">
-      <span class="step-no">2</span>
-      <div>
-        <h2>条件と色を設定する</h2>
-        <p id="config-rule-title"></p>
-      </div>
-    </div>
-    <form id="config-form" autocomplete="off"></form>
-  </section>
+    <div class="workspace">
+      <section class="workspace-empty" id="workspace-empty" aria-labelledby="workspace-empty-title">
+        <div class="empty-sheet" aria-hidden="true">
+          <span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+        </div>
+        <p class="empty-eyebrow">SELECT A RULE</p>
+        <h2 id="workspace-empty-title">左のメニューから<br>やりたいことを選んでください</h2>
+        <p>条件を入力すると、数式・設定手順・仕上がりイメージをここに表示します。</p>
+      </section>
 
-  <section class="result hidden" id="result" aria-label="生成結果">
-    <div class="section-head">
-      <span class="step-no">3</span>
-      <div>
-        <h2>設定方法と数式</h2>
-        <p>下の手順のとおりに設定してください。数式はコピーして貼り付けできます。</p>
-      </div>
-    </div>
-
-    <div class="result-grid">
-      <div class="result-main">
-        <div class="formula-card">
-          <div class="formula-card-head">
-            <span class="fx" aria-hidden="true">fx</span>
-            <span id="formula-label">カスタム数式</span>
-            <button type="button" id="copy-btn" class="copy-btn">コピー</button>
+      <section class="config hidden" id="config" aria-label="条件の設定">
+        <div class="section-head">
+          <span class="step-no">2</span>
+          <div>
+            <h2>条件と色を設定する</h2>
+            <p id="config-rule-title"></p>
           </div>
-          <code id="formula-output" class="formula-output"></code>
-          <p id="formula-error" class="formula-error hidden"></p>
+        </div>
+        <form id="config-form" autocomplete="off"></form>
+      </section>
+
+      <section class="result hidden" id="result" aria-label="生成結果">
+        <div class="section-head">
+          <span class="step-no">3</span>
+          <div>
+            <h2>設定方法と数式</h2>
+            <p>数式をコピーして、表示された手順どおりに設定してください。</p>
+          </div>
         </div>
 
-        <div class="steps-card">
-          <h3 id="steps-title"></h3>
-          <ol id="steps-list"></ol>
-        </div>
-      </div>
+        <div class="result-grid">
+          <div class="result-main">
+            <div class="formula-card">
+              <div class="formula-card-head">
+                <span class="fx" aria-hidden="true">fx</span>
+                <span id="formula-label">カスタム数式</span>
+                <button type="button" id="copy-btn" class="copy-btn">コピー</button>
+              </div>
+              <code id="formula-output" class="formula-output"></code>
+              <p id="formula-error" class="formula-error hidden"></p>
+            </div>
 
-      <aside class="result-side">
-        <div class="preview-card">
-          <h3>結果のイメージ</h3>
-          <div id="preview" class="preview-sheet"></div>
+            <div class="steps-card">
+              <h3 id="steps-title"></h3>
+              <ol id="steps-list"></ol>
+            </div>
+          </div>
+
+          <aside class="result-side">
+            <div class="preview-card">
+              <h3>結果のイメージ</h3>
+              <div id="preview" class="preview-sheet"></div>
+            </div>
+            <div class="notes-card hidden" id="notes-card">
+              <h3>ヒント</h3>
+              <ul id="notes-list"></ul>
+            </div>
+          </aside>
         </div>
-        <div class="notes-card hidden" id="notes-card">
-          <h3>ヒント</h3>
-          <ul id="notes-list"></ul>
-        </div>
-      </aside>
+      </section>
     </div>
-  </section>
+  </div>
 </main>
 
 <footer class="site-footer">

@@ -824,6 +824,7 @@
      ============================================================ */
 
   var groupsEl = document.getElementById('pattern-groups');
+  var workspaceEmptyEl = document.getElementById('workspace-empty');
   var configEl = document.getElementById('config');
   var resultEl = document.getElementById('result');
   var ruleTitleEl = document.getElementById('config-rule-title');
@@ -1159,6 +1160,7 @@
 
     configEl.classList.remove('hidden');
     resultEl.classList.remove('hidden');
+    workspaceEmptyEl.classList.add('hidden');
     configEl.scrollIntoView({ behavior: 'smooth' });
   }
 
