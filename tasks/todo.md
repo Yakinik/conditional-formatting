@@ -39,6 +39,6 @@ Google スプレッドシート / Excel の条件付き書式でよく使うパ�
       `~/.claude/skills/` から symlink）。スモークテスト: init-branches / publish(新規・冪等) 済み。
       未検証: 変更後 publish・sync-main
 - [x] （Codex へ引き継ぎ: `tasks/handoff-codex.md`）app.js / README.md の検収・修正
-- [ ] （Codex へ引き継ぎ）tri-branch-pages init 手順で公開:
+- [x] （Codex へ引き継ぎ）tri-branch-pages init 手順で公開:
       git init -b develop → .pages-manifest → init-branches → gh repo create（Yakinik/conditional-formatting, public）
       → push → publish → default branch=main → Pages 有効化 → URL 確認

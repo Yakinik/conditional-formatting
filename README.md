@@ -76,3 +76,9 @@ index.html   マークアップ(要素の ID / クラス契約)
 style.css    スタイル(方眼紙 × 帳簿の意匠)
 app.js       パターン定義・数式生成・描画
 ```
+
+## ブランチ構成
+
+- `main`: README などのプロジェクト情報(デフォルトブランチ)
+- `develop`: ソースコードと作業文書
+- `gh-pages`: GitHub Pages で配信するファイル
