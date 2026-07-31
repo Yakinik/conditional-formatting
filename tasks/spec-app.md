@@ -19,18 +19,25 @@ app.js が操作する要素(すべて作成済み・ID/クラスは変更しな
 
 カードは `<button type="button" class="pattern-card">` で生成し、選択中は `.selected` を付与
 (CSS がマーチングアンツ枠を表示)。カード構造:
-`<h3>タイトル</h3><p>説明</p><span class="chip">チップ文字列</span>`。
+`<h3>タイトル</h3><p>説明</p>`。
 カテゴリ見出しは `<span class="pattern-group-title" style="background:◯">ラベル</span>`。
 
 ## 2. 状態と全体フロー
 
 ```js
-state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
+state = {
+  app: 'sheets' | 'excel',
+  navId: null,
+  ruleId: null,
+  values: {},
+  valuesByRule: {}
+}
 ```
 
 - `app` は `localStorage('cfgen-app')` に保存・復元
-- カードクリック → `state.ruleId` 設定、`values` をルールのデフォルトで初期化、
-  `#config` / `#result` を表示、`#config` へ `scrollIntoView({behavior:'smooth'})`
+- サイドナビ項目は単独ルール、または複数ルールを束ねたバリエーションを持つ
+- カードクリック → `navId` / `ruleId` を設定し、ルールごとの入力値を `valuesByRule` に保持
+- `#config` / `#result` を表示し、選択カードへ `.selected` を付与
 - フォームの `input` / `change` で `values` を更新し全結果を再描画(生成ボタンは無し、ライブ更新)
 - アプリ切替でも再描画
 
@@ -42,8 +49,9 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
 - `parseRange(str)` — 適用範囲のパース:
   - trim、全角コロン`：`→`:`、`$`と空白を除去、大文字化
   - `/^([A-Z]{1,3})([0-9]*)(?::([A-Z]{1,3})([0-9]*))?$/` にマッチしなければ `null`
-  - 戻り値 `{ text, col, row, cell, abs }`。行番号省略時は `row = 1`。
-    例: `A2:C100` → `{text:'A2:C100', col:'A', row:2, cell:'A2', abs:'$A$2:$C$100'}`
+  - 戻り値は `text / col / endCol / colCount / colStep / row / cell / abs`。
+    行番号省略時は `row = 1`
+  - 例: `A2:C100` は開始列 A、終了列 C、3 列、`cell='A2'`、`abs='$A$2:$C$100'`
 - `absRange(s)` — `A2:C100` → `$A$2:$C$100`(行番号なし `A2:A` → `$A$2:$A`)
 - `colToIdx('A')=0 / idxToCol(0)='A'`(AA 等 2 文字以上も対応)
 - `parseCol(str)` — 判定列入力。大文字化して `/^[A-Z]{1,3}$/`、不一致は `null`
@@ -64,17 +72,23 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
 | purple | 薄い紫 | #e6dcf3 | #563387 |
 | gray | 薄いグレー | #e7e9e7 | #4c554f |
 
-## 5. カテゴリ(表示順)
+## 5. サイドナビ(表示順)
 
-| id | ラベル | 見出し背景 |
-|---|---|---|
-| text | 文字・キーワード | #f7ecd9 |
-| row | 行全体の色付け | #e3efe7 |
-| number | 数値 | #e7ecf6 |
-| date | 日付・期限 | #f6e7e2 |
-| other | その他の定番 | #eee9f6 |
+| グループ | 項目 | 内包するルール |
+| --- | --- | --- |
+| 値を見て判定 | 文字・キーワード | keyword / multiKeyword / rowByCell |
+| 値を見て判定 | 数値 | threshold / between |
+| 値を見て判定 | 日時 | overdue / dueSoon / weekend / datetime |
+| 値を見て判定 | 空白 | blank |
+| 表・リストで判定 | チェックボックス | checkbox |
+| 表・リストで判定 | 重複 | duplicate |
+| 表・リストで判定 | 交互の背景色 | stripes |
+| 表・リストで判定 | 別リストとの一致 | inList |
 
-## 6. ルール定義(13 個)
+`日時` のバリエーション選択ラベルは「プリセット / 自由設定」。表示名は順に
+「期限切れ」「期限が近い」「曜日を指定」「条件を組み合わせる」とする。
+
+## 6. ルール定義(14 個)
 
 共通仕様:
 
@@ -218,19 +232,86 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
 - validate: days NaN または < 0 → 「0 以上の数値を入力してください」
 - sample(header `締切日`): 今日+1(m)/ 今日+max(1, days−1)(m)/ 今日+days+7 / 今日−3
 
-### 6.9 weekend(date)— 土日の日付を色付け
+### 6.9 weekend(date)— 曜日を指定して色付け
 
-- desc: スケジュール表の土曜・日曜に自動で色を付けます。
+- desc: すべての曜日から 1 日または複数日を選び、該当する日付に色を付けます。
 - chip: `WEEKDAY`
-- fields: range=`A2:A100` / target(select: both=土日, sat=土曜のみ, sun=日曜のみ)
+- fields: range=`A2:A100` / days(曜日チップ、default 土・日)
+- 曜日チップは月〜日を個別に切り替え可能。ショートカットは「平日」「土日」「すべて」
 - defaultColor: red
-- 数式(共通): both: `=AND(A2<>"",WEEKDAY(A2,2)>=6)` / sat: `...=6)` / sun: `...=7)`
-- notes:
-  - both: `WEEKDAY(セル,2)` は月曜=1〜日曜=7 を返します。空白セルは除外しています。
-  - both: 祝日にも色を付けたい場合は、祝日一覧の範囲を用意して COUNTIF と組み合わせます。
-- sample(header `日付`): 今週の月〜日 7 行を実際の日付で `M/D(曜)` 表示、target に応じて m
+- 数式(共通):
+  - 土日: `=AND(A2<>"",WEEKDAY(A2,2)>=6)`（従来プリセットと同じ）
+  - 1 曜日: `=AND(A2<>"",WEEKDAY(A2,2)=1)`
+  - 複数曜日: `=AND(A2<>"",OR(WEEKDAY(A2,2)=1,WEEKDAY(A2,2)=3))`
+- validate: 0 曜日 → 「曜日を 1 つ以上選んでください」
+- sample(header `日付`): 今週の月〜日 7 行を `M/D(曜)` で表示し、選択曜日に応じて m
 
-### 6.10 blank(other)— 空白セル(未入力)を色付け
+### 6.10 datetime(date)— 日時の条件を組み合わせる
+
+- desc: 日付・曜日・時刻・営業日を、すべて満たす / いずれか満たすで組み合わせます。
+- chip: `AND / OR`
+- defaultColor: red
+- fields:
+  - range=`A2:A100`
+  - join: `all`=すべて満たす(AND) / `any`=いずれか満たす(OR)
+  - conditions: 1 件以上の条件配列
+- 初期条件: 日付「今日から 14 日以内」
+- 各条件は `type / operator / 値 / negate` を持つ。`negate` は「この条件を除外」
+- 条件の入れ子は設けず、全体の AND/OR と各条件の NOT だけを扱う
+
+条件種別:
+
+| type | 指定できる内容 |
+| --- | --- |
+| date | 今日 / 昨日 / 明日 / 過去 / 未来 / 前後 N 日 / 指定日 / 指定日以前・以後 / 指定期間 |
+| weekday | 月〜日の任意の組み合わせ。平日 / 土日 / すべてのショートカット |
+| time | 指定時刻より前・後 / 時間帯 / 現在から N 時間・N 分以内 |
+| business | 営業日 / 休業日 / 祝日・会社休業日 / 今日から N 営業日以内 |
+
+数式生成:
+
+- 全体を `ISNUMBER(左上セル)` でガードし、空白や文字列を除外
+- date は `INT(セル)` で時刻部分を除いて比較。指定日・期間は `DATE(年,月,日)` へ変換
+- weekday は `WEEKDAY(INT(セル),2)` を使用
+- time の時刻部分は `MOD(セル,1)` と `TIME(時,分,0)` を使用
+- 日をまたぐ時間帯(例: 22:00〜05:00)は 2 条件を OR で接続
+- 現在からの時間・分は `NOW()` と `N/24` または `N/1440` を使用
+- business は休業曜日を 7 桁マスク(月〜日、休業日=`1`)に変換し、
+  `NETWORKDAYS.INTL` / `WORKDAY.INTL` へ渡す
+- 祝日・会社休業日はユーザー指定範囲を参照する。Google スプレッドシートの別シートは
+  `INDIRECT`、Excel は直接参照
+
+デフォルト数式(共通):
+
+`=AND(ISNUMBER(A2),AND(INT(A2)>=TODAY(),INT(A2)<=TODAY()+14))`
+
+組み合わせ例(すべて満たす):
+
+```text
+=AND(
+  ISNUMBER(A2),
+  AND(INT(A2)>=TODAY(),INT(A2)<=TODAY()+14),
+  OR(WEEKDAY(INT(A2),2)=1,WEEKDAY(INT(A2),2)=3,WEEKDAY(INT(A2),2)=5),
+  AND(MOD(A2,1)>=TIME(9,0,0),MOD(A2,1)<=TIME(17,0,0))
+)
+```
+
+営業日:
+
+- 営業日: `NETWORKDAYS.INTL(INT(A2),INT(A2),"0000011",祝日範囲)=1`
+- 休業日: 上記末尾を `=0`
+- 祝日のみ: `COUNTIF(祝日範囲,INT(A2))>0`
+- N 営業日以内: `WORKDAY.INTL(TODAY(),N,"0000011",祝日範囲)` を上限にし、
+  対象日自体も営業日か確認
+- 祝日範囲は「祝日のみ」では必須、他は任意
+- 休業曜日が 7 日すべての場合は検証エラー
+
+プレビュー:
+
+- 今日を基準とした連続日・複数時刻を表示し、入力中の全条件を JavaScript でも評価
+- 祝日範囲があるときは、将来の営業日 1 日を「祝日例」として表示
+
+### 6.11 blank(other)— 空白セル(未入力)を色付け
 
 - desc: 入力漏れのセルに色を付けます。「入力済みセル」への色付けにも切り替えられます。
 - chip: `=""`
@@ -243,7 +324,7 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
   - sheets: 標準の条件「空白」「空白ではない」でも設定できます。
 - sample(header `担当者`): `田中` / (空)/ `佐藤` / (空)を mode で判定して m
 
-### 6.11 duplicate(other)— 重複しているデータを色付け
+### 6.12 duplicate(other)— 重複しているデータを色付け
 
 - desc: 同じ値が 2 回以上出てくるセルに色を付けます。名簿やメール一覧の重複チェックに。
 - chip: `COUNTIF`
@@ -259,7 +340,7 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
 - sample(header `メール`): `sato@example.com` / `tanaka@example.com` / `sato@example.com` /
   `suzuki@example.com` / `tanaka@example.com` を mode で実際に判定して m
 
-### 6.12 stripes(other)— 1 行おきに色を付ける(縞模様)
+### 6.13 stripes(other)— 1 行おきに色を付ける(縞模様)
 
 - desc: 大きな表を読みやすくするゼブラ模様。行を増減しても縞が崩れません。
 - chip: `MOD(ROW(),2)`
@@ -272,7 +353,7 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
 - sample(header `日付/項目/金額`): `4/1/文具/1,200`・`4/3/交通費/860`・`4/5/会議費/3,400`・
   `4/8/消耗品/540` の 4 行。**実際のシート行番号(範囲先頭行+i)の偶奇**で行 m を計算
 
-### 6.13 inList(other)— 別のリストにある値を色付け
+### 6.14 inList(other)— 別のリストにある値を色付け
 
 - desc: NG ワードや会員名簿など、別の場所に用意したリストと一致するセルに色を付けます。
 - chip: `COUNTIF + INDIRECT`
@@ -296,10 +377,13 @@ state = { app: 'sheets' | 'excel', ruleId: null, values: {} }
 ## 7. フォーム生成
 
 - フィールド型: `range`(text + `.mono`)/ `text` / `number` / `column`(text + `.mono`,
-  maxlength 3)/ `select` / 色パレット
+  maxlength 3)/ `select` / `weekdays` / 色パレット
 - 各フィールドは `.field`(label + input + `.help`)。範囲系・キーワード系など主要入力は
   そのまま、フォームは CSS グリッドに任せる。help 文はフィールド定義の `help` を表示
 - select は `<select>` で生成。number は `input[type=number]`
+- `weekdays` は月〜日のトグルボタンと「平日 / 土日 / すべて」のショートカットを表示
+- datetime は専用フォームを使う。条件カードの追加・削除、種別変更、曜日チップ、
+  条件ごとの除外をイベント委譲で処理し、変更のたびに数式・プレビューを更新
 - 色パレットは `.field.field-wide` 内に `.palette` として生成。label は「書式の色」
 
 ## 8. 結果の描画

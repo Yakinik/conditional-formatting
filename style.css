@@ -392,6 +392,8 @@ main {
 
 .field input[type="text"],
 .field input[type="number"],
+.field input[type="date"],
+.field input[type="time"],
 .field select {
   font-family: var(--font-body);
   font-size: 14px;
@@ -422,6 +424,226 @@ main {
   outline: none;
   border-color: var(--green);
   box-shadow: 0 0 0 3px rgba(20, 107, 74, 0.14);
+}
+
+/* 日時条件ビルダー */
+
+.weekday-control { display: grid; gap: 7px; }
+
+.weekday-picker,
+.weekday-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weekday-button,
+.weekday-shortcut {
+  font-family: var(--font-body);
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--rule-line);
+  cursor: pointer;
+}
+
+.weekday-button {
+  width: 36px;
+  height: 34px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.weekday-button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--green);
+  border-color: var(--green);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
+}
+
+.weekday-shortcut {
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+}
+
+.weekday-button:hover,
+.weekday-shortcut:hover { border-color: var(--green); }
+
+.datetime-builder {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  background: rgba(227, 239, 231, 0.38);
+  border: 1px dashed rgba(20, 107, 74, 0.28);
+  border-radius: 8px;
+}
+
+.datetime-builder-intro {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.datetime-builder-intro h3 {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--green-deep);
+}
+
+.datetime-builder-intro > div > p {
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.join-field {
+  flex: 0 1 300px;
+  min-width: 230px;
+}
+
+.datetime-condition-list {
+  position: relative;
+  display: grid;
+  gap: 12px;
+}
+
+.datetime-condition-list::before {
+  content: "";
+  position: absolute;
+  top: 28px;
+  bottom: 28px;
+  left: 17px;
+  border-left: 1px dashed rgba(20, 107, 74, 0.35);
+}
+
+.datetime-condition {
+  position: relative;
+  z-index: 1;
+  padding: 14px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-line);
+  border-radius: 8px;
+  box-shadow: 0 3px 8px rgba(34, 49, 43, 0.04);
+}
+
+.condition-head {
+  display: grid;
+  grid-template-columns: 36px minmax(150px, 220px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.condition-index {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--green-deep);
+  background: var(--green-wash);
+  border: 1px solid rgba(20, 107, 74, 0.28);
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.condition-head select,
+.condition-control input,
+.condition-control select {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-line);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.condition-control input.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.condition-head select:focus,
+.condition-control input:focus,
+.condition-control select:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(20, 107, 74, 0.14);
+}
+
+.condition-negate {
+  justify-self: end;
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.condition-negate input { accent-color: var(--green); }
+
+.condition-remove {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--terracotta);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.condition-remove:disabled {
+  color: var(--ink-faint);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.condition-body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 12px 16px;
+  margin: 14px 0 0 46px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--rule-line);
+}
+
+.condition-control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.condition-control-wide { grid-column: 1 / -1; }
+
+.condition-control > label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.condition-control .help {
+  color: var(--ink-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.condition-add {
+  justify-self: start;
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--green-deep);
+  background: var(--paper-raised);
+  border: 1px dashed rgba(20, 107, 74, 0.45);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.condition-add:hover {
+  background: var(--green-wash);
+  border-style: solid;
 }
 
 /* 色パレット */
@@ -698,4 +920,13 @@ a:focus-visible {
   .pattern-cards { grid-template-columns: 1fr; }
   .workspace-empty { min-height: 320px; padding: 42px 20px; }
   #config-form { grid-template-columns: 1fr; padding: 20px; }
+
+  .datetime-builder { padding: 14px; }
+  .datetime-builder-intro { align-items: stretch; flex-direction: column; }
+  .join-field { flex: none; width: 100%; min-width: 0; }
+  .condition-head { grid-template-columns: 36px 1fr auto; }
+  .condition-head select { grid-column: 2 / -1; }
+  .condition-negate { grid-column: 2; justify-self: start; }
+  .condition-body { grid-template-columns: 1fr; margin-left: 0; }
+  .condition-control-wide { grid-column: auto; }
 }

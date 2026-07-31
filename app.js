@@ -90,6 +90,71 @@
   }
 
   var WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
+  var WEEKDAYS = [
+    { value: '1', label: '月' },
+    { value: '2', label: '火' },
+    { value: '3', label: '水' },
+    { value: '4', label: '木' },
+    { value: '5', label: '金' },
+    { value: '6', label: '土' },
+    { value: '7', label: '日' }
+  ];
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function parseIsoDate(value) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value == null ? '' : value));
+    if (!m) return null;
+    var year = Number(m[1]);
+    var month = Number(m[2]);
+    var day = Number(m[3]);
+    var date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return { year: year, month: month, day: day, date: date };
+  }
+
+  function dateExpr(value) {
+    var parsed = parseIsoDate(value);
+    return parsed ? 'DATE(' + parsed.year + ',' + parsed.month + ',' + parsed.day + ')' : '';
+  }
+
+  function parseClock(value) {
+    var m = /^(\d{2}):(\d{2})$/.exec(String(value == null ? '' : value));
+    if (!m) return null;
+    var hour = Number(m[1]);
+    var minute = Number(m[2]);
+    if (hour > 23 || minute > 59) return null;
+    return { hour: hour, minute: minute, total: hour * 60 + minute };
+  }
+
+  function timeExpr(value) {
+    var parsed = parseClock(value);
+    return parsed ? 'TIME(' + parsed.hour + ',' + parsed.minute + ',0)' : '';
+  }
+
+  function sameDate(a, b) {
+    return a.getFullYear() === b.getFullYear()
+      && a.getMonth() === b.getMonth()
+      && a.getDate() === b.getDate();
+  }
+
+  function startOfDay(date) {
+    var copy = new Date(date.getTime());
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  }
+
+  function cloneValue(value) {
+    if (Array.isArray(value)) return value.map(cloneValue);
+    if (value && typeof value === 'object') {
+      var copy = {};
+      Object.keys(value).forEach(function (key) { copy[key] = cloneValue(value[key]); });
+      return copy;
+    }
+    return value;
+  }
 
   function splitKeywords(s) {
     return String(s == null ? '' : s)
@@ -153,12 +218,14 @@
         },
         {
           id: 'date',
-          label: '日付・曜日',
-          summary: '期限・日数・曜日',
+          label: '日時',
+          summary: '日付・時刻・曜日・営業日',
+          variantLabel: 'プリセット / 自由設定',
           variants: [
             { ruleId: 'overdue', label: '期限切れ' },
             { ruleId: 'dueSoon', label: '期限が近い' },
-            { ruleId: 'weekend', label: '曜日' }
+            { ruleId: 'weekend', label: '曜日を指定' },
+            { ruleId: 'datetime', label: '条件を組み合わせる' }
           ]
         },
         { id: 'blank', label: '空白', summary: '未入力・入力済み', ruleId: 'blank' }
@@ -202,6 +269,362 @@
       case '<>': return a !== b;
       default: return false;
     }
+  }
+
+  var conditionIdCounter = 1;
+
+  function nextConditionId() {
+    conditionIdCounter += 1;
+    return 'condition-' + conditionIdCounter;
+  }
+
+  function makeDatetimeCondition(type, id) {
+    var base = { id: id || nextConditionId(), type: type, negate: false };
+    if (type === 'weekday') {
+      base.days = ['1', '2', '3', '4', '5'];
+    } else if (type === 'time') {
+      base.operator = 'between';
+      base.startTime = '09:00';
+      base.endTime = '17:00';
+      base.time = '17:00';
+      base.amount = 2;
+    } else if (type === 'business') {
+      base.operator = 'business';
+      base.offDays = ['6', '7'];
+      base.holidayRange = '';
+      base.days = 5;
+    } else {
+      base.type = 'date';
+      base.operator = 'nextDays';
+      base.days = 14;
+      base.date = '';
+      base.startDate = '';
+      base.endDate = '';
+    }
+    return base;
+  }
+
+  function isWholeNonNegative(value) {
+    var number = toNum(value);
+    return !isNaN(number) && number >= 0 && Math.floor(number) === number;
+  }
+
+  function weekdayMask(days) {
+    var selected = Array.isArray(days) ? days : [];
+    return WEEKDAYS.map(function (day) {
+      return selected.indexOf(day.value) !== -1 ? '1' : '0';
+    }).join('');
+  }
+
+  function listRefForApp(value, app) {
+    var list = parseListRange(value);
+    if (!list) return '';
+    if (!list.sheet) return list.abs;
+    return app === 'sheets'
+      ? 'INDIRECT("' + escQ(list.sheet + '!' + list.abs) + '")'
+      : list.sheet + '!' + list.abs;
+  }
+
+  function businessFunction(name, cell, condition, app) {
+    var rangeRef = String(condition.holidayRange == null ? '' : condition.holidayRange).trim()
+      ? listRefForApp(condition.holidayRange, app)
+      : '';
+    var args = name === 'WORKDAY.INTL'
+      ? ['TODAY()', String(toNum(condition.days)), '"' + weekdayMask(condition.offDays) + '"']
+      : ['INT(' + cell + ')', 'INT(' + cell + ')', '"' + weekdayMask(condition.offDays) + '"'];
+    if (rangeRef) args.push(rangeRef);
+    return name + '(' + args.join(',') + ')';
+  }
+
+  function datetimePredicate(condition, cell, app) {
+    var op = condition.operator;
+
+    if (condition.type === 'weekday') {
+      var parts = (condition.days || []).map(function (day) {
+        return 'WEEKDAY(INT(' + cell + '),2)=' + day;
+      });
+      return parts.length === 1 ? parts[0] : 'OR(' + parts.join(',') + ')';
+    }
+
+    if (condition.type === 'time') {
+      if (op === 'nextHours') {
+        return 'AND(' + cell + '>=NOW(),' + cell + '<=NOW()+' + toNum(condition.amount) + '/24)';
+      }
+      if (op === 'nextMinutes') {
+        return 'AND(' + cell + '>=NOW(),' + cell + '<=NOW()+' + toNum(condition.amount) + '/1440)';
+      }
+      if (op === 'before') return 'MOD(' + cell + ',1)<' + timeExpr(condition.time);
+      if (op === 'after') return 'MOD(' + cell + ',1)>' + timeExpr(condition.time);
+      var start = parseClock(condition.startTime);
+      var end = parseClock(condition.endTime);
+      var startFormula = timeExpr(condition.startTime);
+      var endFormula = timeExpr(condition.endTime);
+      if (start && end && start.total > end.total) {
+        return 'OR(MOD(' + cell + ',1)>=' + startFormula + ',MOD(' + cell + ',1)<=' + endFormula + ')';
+      }
+      return 'AND(MOD(' + cell + ',1)>=' + startFormula + ',MOD(' + cell + ',1)<=' + endFormula + ')';
+    }
+
+    if (condition.type === 'business') {
+      var holidayRef = String(condition.holidayRange == null ? '' : condition.holidayRange).trim()
+        ? listRefForApp(condition.holidayRange, app)
+        : '';
+      if (op === 'holiday') return 'COUNTIF(' + holidayRef + ',INT(' + cell + '))>0';
+      var networkdays = businessFunction('NETWORKDAYS.INTL', cell, condition, app);
+      if (op === 'business') return networkdays + '=1';
+      if (op === 'nonbusiness') return networkdays + '=0';
+      return 'AND(INT(' + cell + ')>=TODAY(),INT(' + cell + ')<='
+        + businessFunction('WORKDAY.INTL', cell, condition, app) + ',' + networkdays + '=1)';
+    }
+
+    if (op === 'today') return 'INT(' + cell + ')=TODAY()';
+    if (op === 'yesterday') return 'INT(' + cell + ')=TODAY()-1';
+    if (op === 'tomorrow') return 'INT(' + cell + ')=TODAY()+1';
+    if (op === 'past') return 'INT(' + cell + ')<TODAY()';
+    if (op === 'future') return 'INT(' + cell + ')>TODAY()';
+    if (op === 'nextDays') {
+      return 'AND(INT(' + cell + ')>=TODAY(),INT(' + cell + ')<=TODAY()+' + toNum(condition.days) + ')';
+    }
+    if (op === 'pastDays') {
+      return 'AND(INT(' + cell + ')>=TODAY()-' + toNum(condition.days)
+        + ',INT(' + cell + ')<=TODAY())';
+    }
+    if (op === 'onDate') return 'INT(' + cell + ')=' + dateExpr(condition.date);
+    if (op === 'onOrBefore') return 'INT(' + cell + ')<=' + dateExpr(condition.date);
+    if (op === 'onOrAfter') return 'INT(' + cell + ')>=' + dateExpr(condition.date);
+    return 'AND(INT(' + cell + ')>=' + dateExpr(condition.startDate)
+      + ',INT(' + cell + ')<=' + dateExpr(condition.endDate) + ')';
+  }
+
+  function datetimeFormula(values, range) {
+    var conditions = values.conditions || [];
+
+    function forApp(app) {
+      var predicates = conditions.map(function (condition) {
+        var predicate = datetimePredicate(condition, range.cell, app);
+        return condition.negate ? 'NOT(' + predicate + ')' : predicate;
+      });
+      var combined = values.join === 'any' && predicates.length > 1
+        ? 'OR(' + predicates.join(',') + ')'
+        : predicates.join(',');
+      return '=AND(ISNUMBER(' + range.cell + '),' + combined + ')';
+    }
+
+    return { sheets: forApp('sheets'), excel: forApp('excel') };
+  }
+
+  function validateDatetime(values) {
+    var conditions = values.conditions || [];
+    if (!conditions.length) return '条件を 1 つ以上追加してください';
+
+    for (var i = 0; i < conditions.length; i++) {
+      var condition = conditions[i];
+      var position = (i + 1) + 'つ目の条件: ';
+
+      if (condition.type === 'weekday' && (!condition.days || !condition.days.length)) {
+        return position + '曜日を 1 つ以上選んでください';
+      }
+
+      if (condition.type === 'date') {
+        if ((condition.operator === 'nextDays' || condition.operator === 'pastDays')
+          && !isWholeNonNegative(condition.days)) {
+          return position + '日数は 0 以上の整数で入力してください';
+        }
+        if ((condition.operator === 'onDate'
+          || condition.operator === 'onOrBefore'
+          || condition.operator === 'onOrAfter')
+          && !parseIsoDate(condition.date)) {
+          return position + '日付を入力してください';
+        }
+        if (condition.operator === 'between') {
+          var start = parseIsoDate(condition.startDate);
+          var end = parseIsoDate(condition.endDate);
+          if (!start || !end) return position + '期間の開始日と終了日を入力してください';
+          if (start.date > end.date) return position + '開始日が終了日を超えています';
+        }
+      }
+
+      if (condition.type === 'time') {
+        if ((condition.operator === 'before' || condition.operator === 'after')
+          && !parseClock(condition.time)) {
+          return position + '時刻を入力してください';
+        }
+        if (condition.operator === 'between'
+          && (!parseClock(condition.startTime) || !parseClock(condition.endTime))) {
+          return position + '開始時刻と終了時刻を入力してください';
+        }
+        if ((condition.operator === 'nextHours' || condition.operator === 'nextMinutes')
+          && !isWholeNonNegative(condition.amount)) {
+          return position + '時間または分は 0 以上の整数で入力してください';
+        }
+      }
+
+      if (condition.type === 'business') {
+        if (condition.operator !== 'holiday' && weekdayMask(condition.offDays) === '1111111') {
+          return position + '休業曜日を 6 日以下にしてください';
+        }
+        if (condition.operator === 'nextBusiness' && !isWholeNonNegative(condition.days)) {
+          return position + '営業日数は 0 以上の整数で入力してください';
+        }
+        if (String(condition.holidayRange == null ? '' : condition.holidayRange).trim()
+          && !parseListRange(condition.holidayRange)) {
+          return position + '祝日・休業日リストを A2:A20 の形式で入力してください';
+        }
+        if (condition.operator === 'holiday'
+          && !String(condition.holidayRange == null ? '' : condition.holidayRange).trim()) {
+          return position + '祝日・休業日リストを入力してください';
+        }
+      }
+    }
+    return null;
+  }
+
+  function weekdayNumber(date) {
+    return date.getDay() === 0 ? '7' : String(date.getDay());
+  }
+
+  function isPreviewHoliday(date, condition, holidayDate) {
+    return !!String(condition.holidayRange == null ? '' : condition.holidayRange).trim()
+      && sameDate(date, holidayDate);
+  }
+
+  function isPreviewBusinessDay(date, condition, holidayDate) {
+    return (condition.offDays || []).indexOf(weekdayNumber(date)) === -1
+      && !isPreviewHoliday(date, condition, holidayDate);
+  }
+
+  function previewBusinessBoundary(start, count, condition, holidayDate) {
+    var cursor = startOfDay(start);
+    var remaining = toNum(count);
+    var guard = 0;
+    while (remaining > 0 && guard < 3700) {
+      cursor.setDate(cursor.getDate() + 1);
+      if (isPreviewBusinessDay(cursor, condition, holidayDate)) remaining -= 1;
+      guard += 1;
+    }
+    return cursor;
+  }
+
+  function matchesDatetimeCondition(condition, date, now, holidayDate) {
+    var matched = false;
+    var op = condition.operator;
+    var today = startOfDay(now);
+    var day = startOfDay(date);
+    var dayTime = day.getTime();
+    var todayTime = today.getTime();
+    var dayOffset = Math.round((dayTime - todayTime) / 86400000);
+
+    if (condition.type === 'weekday') {
+      matched = (condition.days || []).indexOf(weekdayNumber(date)) !== -1;
+    } else if (condition.type === 'time') {
+      var minutes = date.getHours() * 60 + date.getMinutes();
+      if (op === 'before') matched = minutes < parseClock(condition.time).total;
+      else if (op === 'after') matched = minutes > parseClock(condition.time).total;
+      else if (op === 'nextHours') {
+        matched = date >= now && date <= new Date(now.getTime() + toNum(condition.amount) * 60 * 60 * 1000);
+      } else if (op === 'nextMinutes') {
+        matched = date >= now && date <= new Date(now.getTime() + toNum(condition.amount) * 60 * 1000);
+      } else {
+        var start = parseClock(condition.startTime).total;
+        var end = parseClock(condition.endTime).total;
+        matched = start > end
+          ? minutes >= start || minutes <= end
+          : minutes >= start && minutes <= end;
+      }
+    } else if (condition.type === 'business') {
+      var business = isPreviewBusinessDay(date, condition, holidayDate);
+      if (op === 'business') matched = business;
+      else if (op === 'nonbusiness') matched = !business;
+      else if (op === 'holiday') matched = isPreviewHoliday(date, condition, holidayDate);
+      else {
+        var boundary = previewBusinessBoundary(today, condition.days, condition, holidayDate);
+        matched = dayTime >= todayTime && dayTime <= boundary.getTime() && business;
+      }
+    } else {
+      if (op === 'today') matched = dayTime === todayTime;
+      else if (op === 'yesterday') matched = dayOffset === -1;
+      else if (op === 'tomorrow') matched = dayOffset === 1;
+      else if (op === 'past') matched = dayOffset < 0;
+      else if (op === 'future') matched = dayOffset > 0;
+      else if (op === 'nextDays') {
+        matched = dayOffset >= 0 && dayOffset <= toNum(condition.days);
+      } else if (op === 'pastDays') {
+        matched = dayOffset >= -toNum(condition.days) && dayOffset <= 0;
+      } else if (op === 'onDate') {
+        matched = dayTime === startOfDay(parseIsoDate(condition.date).date).getTime();
+      } else if (op === 'onOrBefore') {
+        matched = dayTime <= startOfDay(parseIsoDate(condition.date).date).getTime();
+      } else if (op === 'onOrAfter') {
+        matched = dayTime >= startOfDay(parseIsoDate(condition.date).date).getTime();
+      } else {
+        matched = dayTime >= startOfDay(parseIsoDate(condition.startDate).date).getTime()
+          && dayTime <= startOfDay(parseIsoDate(condition.endDate).date).getTime();
+      }
+    }
+
+    return condition.negate ? !matched : matched;
+  }
+
+  function sampleDatetime(values) {
+    var now = new Date();
+    var conditions = values.conditions || [];
+    var businessCondition = conditions.filter(function (condition) {
+      return condition.type === 'business';
+    })[0] || {
+      type: 'business',
+      operator: 'business',
+      offDays: ['6', '7'],
+      holidayRange: '',
+      days: 5,
+      negate: false
+    };
+    var holidayDate = addDays(1);
+    var holidayGuard = 0;
+    while ((businessCondition.offDays || []).indexOf(weekdayNumber(holidayDate)) !== -1
+      && holidayGuard < 7) {
+      holidayDate.setDate(holidayDate.getDate() + 1);
+      holidayGuard += 1;
+    }
+
+    var offsets = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 14];
+    var times = [[8, 30], [9, 30], [12, 0], [15, 30], [18, 30], [10, 0], [17, 0], [22, 0], [6, 30], [14, 0]];
+    var candidates = offsets.map(function (offset, index) {
+      var date = addDays(offset);
+      date.setHours(times[index][0], times[index][1], 0, 0);
+      return date;
+    });
+
+    var relativeTime = conditions.filter(function (condition) {
+      return condition.type === 'time'
+        && (condition.operator === 'nextHours' || condition.operator === 'nextMinutes');
+    })[0];
+    if (relativeTime) {
+      var unit = relativeTime.operator === 'nextHours' ? 60 * 60 * 1000 : 60 * 1000;
+      var amount = Math.max(0, toNum(relativeTime.amount));
+      candidates[1] = new Date(now.getTime() + (amount / 2) * unit);
+      candidates[2] = new Date(now.getTime() + (amount + 1) * unit);
+    }
+
+    var showHolidayExample = conditions.some(function (condition) {
+      return condition.type === 'business'
+        && String(condition.holidayRange == null ? '' : condition.holidayRange).trim();
+    });
+
+    return {
+      head: ['日時'],
+      rows: cellRows(candidates.map(function (date) {
+        var results = conditions.map(function (condition) {
+          return matchesDatetimeCondition(condition, date, now, holidayDate);
+        });
+        var match = values.join === 'any'
+          ? results.some(function (result) { return result; })
+          : results.every(function (result) { return result; });
+        var label = fmtDate(date) + '(' + WEEKDAY_NAMES[date.getDay()] + ') '
+          + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
+        if (showHolidayExample && sameDate(date, holidayDate)) label += '・祝日例';
+        return [[label], match];
+      }))
+    };
   }
 
   /* ============================================================
@@ -522,7 +945,7 @@
       }
     },
 
-    /* ---------- 日付・期限 ---------- */
+    /* ---------- 日時 ---------- */
 
     {
       id: 'overdue',
@@ -605,30 +1028,41 @@
     {
       id: 'weekend',
       cat: 'date',
-      title: '土日の日付を色付け',
-      desc: 'スケジュール表の土曜・日曜に自動で色を付けます。',
+      title: '曜日を指定して色付け',
+      desc: 'すべての曜日から 1 日または複数日を選び、該当する日付に色を付けます。',
       chip: 'WEEKDAY',
       color: 'red',
       fields: [
         { name: 'range', type: 'range', label: '適用範囲', def: 'A2:A100' },
         {
-          name: 'target', type: 'select', label: '対象', def: 'both',
-          options: [
-            { value: 'both', label: '土日' },
-            { value: 'sat', label: '土曜のみ' },
-            { value: 'sun', label: '日曜のみ' }
-          ]
+          name: 'days', type: 'weekdays', label: '対象の曜日', def: ['6', '7'],
+          help: '曜日を複数選べます。ショートカットで平日・土日・すべても指定できます。'
         }
       ],
+      validate: function (v) {
+        if (!v.days || !v.days.length) return '曜日を 1 つ以上選んでください';
+        return null;
+      },
       formula: function (v, r) {
         var c = r.cell;
-        var cond = v.target === 'sat' ? '=6' : (v.target === 'sun' ? '=7' : '>=6');
-        var f = '=AND(' + c + '<>"",WEEKDAY(' + c + ',2)' + cond + ')';
+        var days = v.days || [];
+        var predicate;
+        if (days.length === 7) predicate = 'WEEKDAY(' + c + ',2)>=1';
+        else if (days.length === 2 && days.indexOf('6') !== -1 && days.indexOf('7') !== -1) {
+          predicate = 'WEEKDAY(' + c + ',2)>=6';
+        } else if (days.length === 1) {
+          predicate = 'WEEKDAY(' + c + ',2)=' + days[0];
+        } else {
+          predicate = 'OR(' + days.map(function (day) {
+            return 'WEEKDAY(' + c + ',2)=' + day;
+          }).join(',') + ')';
+        }
+        var f = '=AND(' + c + '<>"",' + predicate + ')';
         return { sheets: f, excel: f };
       },
       notes: [
         { app: 'both', html: '<code>WEEKDAY(セル,2)</code> は月曜=1〜日曜=7 を返します。空白セルは除外しています。' },
-        { app: 'both', html: '祝日にも色を付けたい場合は、祝日一覧の範囲を用意して COUNTIF と組み合わせます。' }
+        { app: 'both', html: '曜日と祝日、期間などを一緒に判定する場合は「条件を組み合わせる」を選びます。' }
       ],
       sample: function (v) {
         var today = new Date();
@@ -637,12 +1071,55 @@
         for (var i = 0; i < 7; i++) {
           var d = addDays(mondayOffset + i);
           var day = d.getDay();
-          var m = v.target === 'sat' ? day === 6
-            : (v.target === 'sun' ? day === 0 : (day === 6 || day === 0));
+          var weekdayNumber = day === 0 ? '7' : String(day);
+          var m = (v.days || []).indexOf(weekdayNumber) !== -1;
           rows.push([[fmtDate(d) + '(' + WEEKDAY_NAMES[day] + ')'], m]);
         }
         return { head: ['日付'], rows: cellRows(rows) };
       }
+    },
+
+    {
+      id: 'datetime',
+      cat: 'date',
+      title: '日時の条件を組み合わせる',
+      desc: '日付・曜日・時刻・営業日を、すべて満たす / いずれか満たすで組み合わせます。',
+      chip: 'AND / OR',
+      color: 'red',
+      customForm: 'datetime',
+      fields: [
+        { name: 'range', type: 'range', label: '適用範囲', def: 'A2:A100' },
+        {
+          name: 'join', type: 'select', label: '条件のつなぎ方', def: 'all',
+          options: [
+            { value: 'all', label: 'すべて満たす（AND）' },
+            { value: 'any', label: 'いずれか満たす（OR）' }
+          ]
+        },
+        {
+          name: 'conditions', type: 'conditions',
+          def: [{
+            id: 'condition-1',
+            type: 'date',
+            operator: 'nextDays',
+            days: 14,
+            date: '',
+            startDate: '',
+            endDate: '',
+            negate: false
+          }]
+        }
+      ],
+      validate: validateDatetime,
+      formula: datetimeFormula,
+      notes: [
+        { app: 'both', html: '日付だけを比べる条件は <code>INT(セル)</code> を使うため、セルに時刻が含まれていても日付部分だけで判定します。' },
+        { app: 'both', html: '祝日・会社休業日は自動取得せず、シート内に用意した日付リストを参照します。休業曜日は月〜日の中から変更できます。' },
+        { app: 'both', html: '<code>NOW()</code> を使う条件はシートの再計算時に更新されます。時計のように常時更新されるわけではありません。' },
+        { app: 'sheets', html: '別シートの祝日リストは、カスタム数式の制約に合わせて <code>INDIRECT</code> で参照します。' },
+        { app: 'excel', html: '営業日の判定には <code>NETWORKDAYS.INTL</code>、期限には <code>WORKDAY.INTL</code> を使います。' }
+      ],
+      sample: sampleDatetime
     },
 
     /* ---------- その他の定番 ---------- */
@@ -962,6 +1439,58 @@
      フォーム
      ============================================================ */
 
+  function buildWeekdayPicker(selectedDays, options) {
+    var selected = Array.isArray(selectedDays) ? selectedDays : [];
+    var control = document.createElement('div');
+    control.className = 'weekday-control';
+
+    var picker = document.createElement('div');
+    picker.className = 'weekday-picker';
+    picker.setAttribute('aria-label', options.ariaLabel || '曜日を選択');
+
+    WEEKDAYS.forEach(function (day) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'weekday-button';
+      button.textContent = day.label;
+      button.setAttribute('aria-pressed', selected.indexOf(day.value) !== -1 ? 'true' : 'false');
+      button.setAttribute('data-day', day.value);
+      if (options.conditionId) {
+        button.setAttribute('data-condition-day', 'true');
+        button.setAttribute('data-condition-id', options.conditionId);
+        button.setAttribute('data-condition-array', options.arrayName);
+      } else {
+        button.setAttribute('data-weekday-field', options.fieldName);
+      }
+      picker.appendChild(button);
+    });
+    control.appendChild(picker);
+
+    var shortcuts = document.createElement('div');
+    shortcuts.className = 'weekday-shortcuts';
+    [
+      { value: 'weekdays', label: '平日' },
+      { value: 'weekend', label: '土日' },
+      { value: 'all', label: 'すべて' }
+    ].forEach(function (shortcut) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'weekday-shortcut';
+      button.textContent = shortcut.label;
+      button.setAttribute('data-shortcut', shortcut.value);
+      if (options.conditionId) {
+        button.setAttribute('data-condition-shortcut', 'true');
+        button.setAttribute('data-condition-id', options.conditionId);
+        button.setAttribute('data-condition-array', options.arrayName);
+      } else {
+        button.setAttribute('data-weekday-shortcut-field', options.fieldName);
+      }
+      shortcuts.appendChild(button);
+    });
+    control.appendChild(shortcuts);
+    return control;
+  }
+
   function buildField(field) {
     var wrap = document.createElement('div');
     wrap.className = 'field';
@@ -971,6 +1500,20 @@
     label.setAttribute('for', id);
     label.textContent = field.label;
     wrap.appendChild(label);
+
+    if (field.type === 'weekdays') {
+      wrap.appendChild(buildWeekdayPicker(state.values[field.name], {
+        fieldName: field.name,
+        ariaLabel: field.label
+      }));
+      if (field.help) {
+        var weekdayHelp = document.createElement('p');
+        weekdayHelp.className = 'help';
+        weekdayHelp.textContent = field.help;
+        wrap.appendChild(weekdayHelp);
+      }
+      return wrap;
+    }
 
     var input;
     if (field.type === 'select') {
@@ -1010,7 +1553,7 @@
     var field = {
       name: 'ruleVariant',
       type: 'select',
-      label: '条件の種類',
+      label: item.variantLabel || '条件の種類',
       options: item.variants.map(function (variant) {
         return { value: variant.ruleId, label: variant.label };
       })
@@ -1060,7 +1603,317 @@
     return wrap;
   }
 
+  function conditionById(id) {
+    var conditions = state.values.conditions || [];
+    for (var i = 0; i < conditions.length; i++) {
+      if (conditions[i].id === id) return conditions[i];
+    }
+    return null;
+  }
+
+  function setConditionBinding(element, condition, name) {
+    element.setAttribute('data-condition-id', condition.id);
+    element.setAttribute('data-condition-field', name);
+  }
+
+  function makeConditionSelect(condition, name, value, options, label) {
+    var select = document.createElement('select');
+    select.setAttribute('aria-label', label);
+    options.forEach(function (option) {
+      var item = document.createElement('option');
+      item.value = option.value;
+      item.textContent = option.label;
+      select.appendChild(item);
+    });
+    select.value = value;
+    setConditionBinding(select, condition, name);
+    return select;
+  }
+
+  function makeConditionInput(condition, name, type, value, label, inputOptions) {
+    var input = document.createElement('input');
+    input.type = type;
+    input.value = String(value == null ? '' : value);
+    input.setAttribute('aria-label', label);
+    setConditionBinding(input, condition, name);
+    if (inputOptions && inputOptions.min != null) input.min = String(inputOptions.min);
+    if (inputOptions && inputOptions.step != null) input.step = String(inputOptions.step);
+    if (inputOptions && inputOptions.placeholder) input.placeholder = inputOptions.placeholder;
+    if (inputOptions && inputOptions.mono) input.className = 'mono';
+    return input;
+  }
+
+  function appendConditionControl(parent, labelText, control, help, wide) {
+    var wrap = document.createElement('div');
+    wrap.className = 'condition-control' + (wide ? ' condition-control-wide' : '');
+    var label = document.createElement('label');
+    label.textContent = labelText;
+    wrap.appendChild(label);
+    wrap.appendChild(control);
+    if (help) {
+      var note = document.createElement('p');
+      note.className = 'help';
+      note.textContent = help;
+      wrap.appendChild(note);
+    }
+    parent.appendChild(wrap);
+  }
+
+  function buildDateConditionBody(body, condition) {
+    var operators = [
+      { value: 'today', label: '今日' },
+      { value: 'yesterday', label: '昨日' },
+      { value: 'tomorrow', label: '明日' },
+      { value: 'onDate', label: '指定日' },
+      { value: 'past', label: '今日より前' },
+      { value: 'future', label: '今日より後' },
+      { value: 'nextDays', label: '今日から N 日以内' },
+      { value: 'pastDays', label: '過去 N 日以内' },
+      { value: 'onOrBefore', label: '指定日以前' },
+      { value: 'onOrAfter', label: '指定日以後' },
+      { value: 'between', label: '指定期間' }
+    ];
+    appendConditionControl(
+      body,
+      '日付の指定',
+      makeConditionSelect(condition, 'operator', condition.operator, operators, '日付の指定')
+    );
+
+    if (condition.operator === 'nextDays' || condition.operator === 'pastDays') {
+      appendConditionControl(
+        body,
+        '日数',
+        makeConditionInput(condition, 'days', 'number', condition.days, '日数', { min: 0, step: 1 })
+      );
+    } else if (condition.operator === 'onDate'
+      || condition.operator === 'onOrBefore'
+      || condition.operator === 'onOrAfter') {
+      appendConditionControl(
+        body,
+        '基準日',
+        makeConditionInput(condition, 'date', 'date', condition.date, '基準日')
+      );
+    } else if (condition.operator === 'between') {
+      appendConditionControl(
+        body,
+        '開始日',
+        makeConditionInput(condition, 'startDate', 'date', condition.startDate, '開始日')
+      );
+      appendConditionControl(
+        body,
+        '終了日',
+        makeConditionInput(condition, 'endDate', 'date', condition.endDate, '終了日')
+      );
+    }
+  }
+
+  function buildTimeConditionBody(body, condition) {
+    var operators = [
+      { value: 'before', label: '指定時刻より前' },
+      { value: 'after', label: '指定時刻より後' },
+      { value: 'between', label: '指定時間帯' },
+      { value: 'nextHours', label: '現在から N 時間以内' },
+      { value: 'nextMinutes', label: '現在から N 分以内' }
+    ];
+    appendConditionControl(
+      body,
+      '時刻の指定',
+      makeConditionSelect(condition, 'operator', condition.operator, operators, '時刻の指定')
+    );
+
+    if (condition.operator === 'before' || condition.operator === 'after') {
+      appendConditionControl(
+        body,
+        '基準時刻',
+        makeConditionInput(condition, 'time', 'time', condition.time, '基準時刻')
+      );
+    } else if (condition.operator === 'between') {
+      appendConditionControl(
+        body,
+        '開始時刻',
+        makeConditionInput(condition, 'startTime', 'time', condition.startTime, '開始時刻')
+      );
+      appendConditionControl(
+        body,
+        '終了時刻',
+        makeConditionInput(condition, 'endTime', 'time', condition.endTime, '終了時刻'),
+        '日をまたぐ時間帯にも対応'
+      );
+    } else {
+      appendConditionControl(
+        body,
+        condition.operator === 'nextHours' ? '時間' : '分',
+        makeConditionInput(condition, 'amount', 'number', condition.amount, '時間または分', { min: 0, step: 1 })
+      );
+    }
+  }
+
+  function buildBusinessConditionBody(body, condition) {
+    var operators = [
+      { value: 'business', label: '営業日' },
+      { value: 'nonbusiness', label: '休業日（休業曜日・祝日）' },
+      { value: 'holiday', label: '祝日・会社休業日のみ' },
+      { value: 'nextBusiness', label: '今日から N 営業日以内' }
+    ];
+    appendConditionControl(
+      body,
+      '営業日の指定',
+      makeConditionSelect(condition, 'operator', condition.operator, operators, '営業日の指定')
+    );
+
+    if (condition.operator === 'nextBusiness') {
+      appendConditionControl(
+        body,
+        '営業日数',
+        makeConditionInput(condition, 'days', 'number', condition.days, '営業日数', { min: 0, step: 1 })
+      );
+    }
+
+    if (condition.operator !== 'holiday') {
+      appendConditionControl(
+        body,
+        '休業曜日',
+        buildWeekdayPicker(condition.offDays, {
+          conditionId: condition.id,
+          arrayName: 'offDays',
+          ariaLabel: '休業曜日'
+        }),
+        '初期値は土日',
+        true
+      );
+    }
+
+    appendConditionControl(
+      body,
+      '祝日・会社休業日の範囲',
+      makeConditionInput(
+        condition,
+        'holidayRange',
+        'text',
+        condition.holidayRange,
+        '祝日・会社休業日の範囲',
+        { placeholder: '例: 祝日!A2:A30', mono: true }
+      ),
+      condition.operator === 'holiday'
+        ? '必須。同じシートは E2:E30、別シートは 祝日!A2:A30'
+        : '任意。空欄なら休業曜日だけで判定',
+      true
+    );
+  }
+
+  function buildDatetimeCondition(condition, index, total) {
+    var card = document.createElement('section');
+    card.className = 'datetime-condition';
+    card.setAttribute('aria-label', (index + 1) + 'つ目の条件');
+
+    var head = document.createElement('div');
+    head.className = 'condition-head';
+
+    var number = document.createElement('span');
+    number.className = 'condition-index';
+    number.textContent = String(index + 1);
+    head.appendChild(number);
+
+    head.appendChild(makeConditionSelect(condition, 'type', condition.type, [
+      { value: 'date', label: '日付' },
+      { value: 'weekday', label: '曜日' },
+      { value: 'time', label: '時刻' },
+      { value: 'business', label: '営業日・休日' }
+    ], '条件の種類'));
+
+    var negate = document.createElement('label');
+    negate.className = 'condition-negate';
+    var checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!condition.negate;
+    setConditionBinding(checkbox, condition, 'negate');
+    negate.appendChild(checkbox);
+    negate.appendChild(document.createTextNode(' この条件を除外'));
+    head.appendChild(negate);
+
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'condition-remove';
+    remove.textContent = '削除';
+    remove.disabled = total === 1;
+    remove.setAttribute('data-remove-condition', condition.id);
+    head.appendChild(remove);
+    card.appendChild(head);
+
+    var body = document.createElement('div');
+    body.className = 'condition-body';
+
+    if (condition.type === 'weekday') {
+      appendConditionControl(
+        body,
+        '対象の曜日',
+        buildWeekdayPicker(condition.days, {
+          conditionId: condition.id,
+          arrayName: 'days',
+          ariaLabel: '対象の曜日'
+        }),
+        '1 日または複数日を選択',
+        true
+      );
+    } else if (condition.type === 'time') {
+      buildTimeConditionBody(body, condition);
+    } else if (condition.type === 'business') {
+      buildBusinessConditionBody(body, condition);
+    } else {
+      buildDateConditionBody(body, condition);
+    }
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function renderDatetimeForm(rule, item) {
+    clearEl(formEl);
+    formEl.appendChild(buildVariantField(item));
+    formEl.appendChild(buildField(rule.fields[0]));
+
+    var builder = document.createElement('div');
+    builder.className = 'datetime-builder field-wide';
+
+    var intro = document.createElement('div');
+    intro.className = 'datetime-builder-intro';
+    var heading = document.createElement('div');
+    var title = document.createElement('h3');
+    title.textContent = '判定する条件';
+    heading.appendChild(title);
+    var description = document.createElement('p');
+    description.textContent = '条件を追加し、全体のつなぎ方と必要な除外を指定します。';
+    heading.appendChild(description);
+    intro.appendChild(heading);
+
+    var joinField = buildField(rule.fields[1]);
+    joinField.classList.add('join-field');
+    intro.appendChild(joinField);
+    builder.appendChild(intro);
+
+    var list = document.createElement('div');
+    list.className = 'datetime-condition-list';
+    (state.values.conditions || []).forEach(function (condition, index, conditions) {
+      list.appendChild(buildDatetimeCondition(condition, index, conditions.length));
+    });
+    builder.appendChild(list);
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'condition-add';
+    add.textContent = '＋ 条件を追加';
+    add.setAttribute('data-add-condition', 'true');
+    builder.appendChild(add);
+
+    formEl.appendChild(builder);
+    formEl.appendChild(buildPalette());
+  }
+
   function renderForm(rule, item) {
+    if (rule.customForm === 'datetime') {
+      renderDatetimeForm(rule, item);
+      return;
+    }
     clearEl(formEl);
     if (item.variants) formEl.appendChild(buildVariantField(item));
     rule.fields.forEach(function (field) {
@@ -1259,7 +2112,7 @@
 
   function defaultValues(rule) {
     var values = {};
-    rule.fields.forEach(function (field) { values[field.name] = field.def; });
+    rule.fields.forEach(function (field) { values[field.name] = cloneValue(field.def); });
     values.color = rule.color;
     return values;
   }
@@ -1343,15 +2196,113 @@
      イベント / 初期化
      ============================================================ */
 
+  function selectedDaysForShortcut(shortcut) {
+    if (shortcut === 'weekdays') return ['1', '2', '3', '4', '5'];
+    if (shortcut === 'weekend') return ['6', '7'];
+    return ['1', '2', '3', '4', '5', '6', '7'];
+  }
+
+  function rerenderCurrentForm() {
+    var rule = ruleById(state.ruleId);
+    var item = navItemById(state.navId);
+    if (rule && item) renderForm(rule, item);
+  }
+
+  function toggleDay(days, day) {
+    var selected = Array.isArray(days) ? days.slice() : [];
+    var index = selected.indexOf(day);
+    if (index === -1) selected.push(day);
+    else selected.splice(index, 1);
+    return selected.sort();
+  }
+
   function onFormChange(e) {
     if (e.target && e.target.getAttribute && e.target.getAttribute('data-variant')) {
       selectRule(e.target.value, state.navId);
       return;
     }
+
+    var conditionId = e.target && e.target.getAttribute
+      && e.target.getAttribute('data-condition-id');
+    var conditionField = e.target && e.target.getAttribute
+      && e.target.getAttribute('data-condition-field');
+    if (conditionId && conditionField) {
+      var condition = conditionById(conditionId);
+      if (!condition) return;
+      if (conditionField === 'type') {
+        var replacement = makeDatetimeCondition(e.target.value, condition.id);
+        replacement.negate = condition.negate;
+        var position = state.values.conditions.indexOf(condition);
+        state.values.conditions[position] = replacement;
+      } else {
+        condition[conditionField] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+      }
+      if (conditionField === 'type' || conditionField === 'operator') rerenderCurrentForm();
+      renderResult();
+      return;
+    }
+
     var name = e.target && e.target.getAttribute && e.target.getAttribute('data-field');
     if (!name) return;
     state.values[name] = e.target.value;
     renderResult();
+  }
+
+  function onFormClick(e) {
+    var target = e.target;
+    if (!target || !target.getAttribute) return;
+
+    var fieldName = target.getAttribute('data-weekday-field');
+    if (fieldName) {
+      state.values[fieldName] = toggleDay(state.values[fieldName], target.getAttribute('data-day'));
+      rerenderCurrentForm();
+      renderResult();
+      return;
+    }
+
+    var shortcutField = target.getAttribute('data-weekday-shortcut-field');
+    if (shortcutField) {
+      state.values[shortcutField] = selectedDaysForShortcut(target.getAttribute('data-shortcut'));
+      rerenderCurrentForm();
+      renderResult();
+      return;
+    }
+
+    var conditionId = target.getAttribute('data-condition-id');
+    var arrayName = target.getAttribute('data-condition-array');
+    if (target.getAttribute('data-condition-day') && conditionId && arrayName) {
+      var condition = conditionById(conditionId);
+      if (!condition) return;
+      condition[arrayName] = toggleDay(condition[arrayName], target.getAttribute('data-day'));
+      rerenderCurrentForm();
+      renderResult();
+      return;
+    }
+
+    if (target.getAttribute('data-condition-shortcut') && conditionId && arrayName) {
+      var shortcutCondition = conditionById(conditionId);
+      if (!shortcutCondition) return;
+      shortcutCondition[arrayName] = selectedDaysForShortcut(target.getAttribute('data-shortcut'));
+      rerenderCurrentForm();
+      renderResult();
+      return;
+    }
+
+    if (target.getAttribute('data-add-condition')) {
+      state.values.conditions.push(makeDatetimeCondition('date'));
+      rerenderCurrentForm();
+      renderResult();
+      return;
+    }
+
+    var removeId = target.getAttribute('data-remove-condition');
+    if (removeId) {
+      state.values.conditions = state.values.conditions.filter(function (condition) {
+        return condition.id !== removeId;
+      });
+      rerenderCurrentForm();
+      renderResult();
+    }
   }
 
   function setApp(app) {
@@ -1374,6 +2325,7 @@
     formEl.addEventListener('submit', function (e) { e.preventDefault(); });
     formEl.addEventListener('input', onFormChange);
     formEl.addEventListener('change', onFormChange);
+    formEl.addEventListener('click', onFormClick);
     copyBtn.addEventListener('click', copyFormula);
 
     renderCards();
