@@ -42,3 +42,12 @@ Google スプレッドシート / Excel の条件付き書式でよく使うパ�
 - [x] （Codex へ引き継ぎ）tri-branch-pages init 手順で公開:
       git init -b develop → .pages-manifest → init-branches → gh repo create（Yakinik/conditional-formatting, public）
       → push → publish → default branch=main → Pages 有効化 → URL 確認
+
+## v2: 表中心ワークベンチ
+
+- [x] Preact + Signals + FSD v2.1 の構成と機能パリティを確定
+- [x] ワークブック・範囲・条件ツリー・数式コンパイラ
+- [x] 表中心 UI・右サイドバー・ルールレンズ
+- [x] XLSX / CSV / TSV / 貼り付け取り込み
+- [x] 型・単体・FSD・本番ビルド検証
+- [x] Playwright CLI による実操作・レスポンシブ検証

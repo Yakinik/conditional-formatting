@@ -1,2 +1,7 @@
 .playwright-cli/
 s1.yaml
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+package-lock.json

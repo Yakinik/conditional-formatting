@@ -1,0 +1,33 @@
+{
+  "name": "conditional-formatting-workbench",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:fsd": "CHOKIDAR_USEPOLLING=1 steiger ./src",
+    "build:app": "vite build",
+    "prepare:pages": "node scripts/prepare-pages.mjs",
+    "build": "pnpm typecheck && pnpm build:app && pnpm prepare:pages",
+    "check": "pnpm typecheck && pnpm test && pnpm lint:fsd && pnpm build:app && pnpm prepare:pages",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@preact/signals": "2.10.0",
+    "preact": "10.29.7",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@feature-sliced/steiger-plugin": "0.7.0",
+    "@preact/preset-vite": "2.10.6",
+    "@types/node": "26.1.2",
+    "steiger": "0.6.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
+  }
+}
